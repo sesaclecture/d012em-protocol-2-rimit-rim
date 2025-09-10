@@ -167,7 +167,15 @@ def read_imu() -> Dict[str, int]:
 
     with SMBus(1) as bus:
         # TODO: I2C로 MPU6050에서 6축 값 읽기
-        pass
+        # 가속도
+        ax = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.ACCEL_XOUT_H)
+        ay = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.ACCEL_XOUT_H + 2)
+        az = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.ACCEL_XOUT_H + 4)
+
+        # 자이로
+        gx = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.GYRO_XOUT_H)
+        gy = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.GYRO_XOUT_H + 2)
+        gz = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.GYRO_XOUT_H + 4)
 
     return {"ax": ax, "ay": ay, "az": az, "gx": gx, "gy": gy, "gz": gz}
 
@@ -180,9 +188,17 @@ def wake_device() -> Tuple[int, int]:
     with SMBus(1) as bus:
         # TODO: PWR_MGMT_1 레지스터 읽고, sleep bit 토글
         before = bus.read_byte_data(Mpu6050Reg.ADDR, Mpu6050Reg.PWR_MGMT_1)
-        verify = "not implemented"
 
-    return before, verify
+        # sleep bit
+        new_value = before ^ (1 << 6)
+
+        # 새 값 다시 쓰기
+        bus.write_byte_data(Mpu6050Reg.ADDR, Mpu6050Reg.PWR_MGMT_1, new_value)
+
+        # 다시 읽어 확인
+        after = bus.read_byte_data(Mpu6050Reg.ADDR, Mpu6050Reg.PWR_MGMT_1)
+
+    return before, after
 
 
 def rfid_poll_once() -> Tuple[bool, Optional[bytes]]:
@@ -194,6 +210,9 @@ def rfid_poll_once() -> Tuple[bool, Optional[bytes]]:
     r = Rc522SPI()
     try:
         # TODO: REQA 전송 후 ATQA 수신
+        ret = r.transceive_7bit(0x26)   # REQA = 0x26
+        if ret:
+            return True, ret
         return False, None
     finally:
         r.close()
@@ -208,7 +227,12 @@ def rfid_set_antenna(on: bool) -> int:
     r = Rc522SPI()
     try:
         # TODO: 안테나 on/off 설정
-        return 0
+        if on:
+            r.set_bits(Rc522Reg.TX_CONTROL, 0x03)
+        else:
+            r.clear_bits(Rc522Reg.TX_CONTROL, 0x03)
+        status = r.read_reg(Rc522Reg.TX_CONTROL)
+        return status
     finally:
         r.close()
 
@@ -223,8 +247,8 @@ def ssh_get_arch() -> str:
     archs = ("aarch64", "arm64")
 
     # TODO: user_host, cmd 채우기
-    user_host = ""
-    cmd = ""
+    user_host = "surim@192.168.100.149"
+    cmd = "uname -m"
 
     if not user_host or not user_host.strip():
         raise ValueError("user_host를 반드시 채우세요.")
